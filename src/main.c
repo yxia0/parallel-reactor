@@ -120,6 +120,7 @@ static void generateReport(int dt, int timestep, struct simulation_configuration
  **/
 static void updateReactorCore(int dt, struct simulation_configuration_struct *configuration)
 {
+  // iterate through all channels
   for (int i = 0; i < configuration->channels_x; i++)
   {
     for (int j = 0; j < configuration->channels_y; j++)
@@ -141,6 +142,7 @@ static void updateReactorCore(int dt, struct simulation_configuration_struct *co
  * Update each neutron at the current timestep, moving its position based upon the velocity
  * components and energy, and then handling the collision of the neutron with a fuel channel,
  * moderator, or control rod
+ * Move first -> Check collision
  **/
 static void updateNeutrons(int dt, struct simulation_configuration_struct *configuration)
 {
@@ -154,6 +156,7 @@ static void updateNeutrons(int dt, struct simulation_configuration_struct *confi
       double component_velocity_x = ((abs(neutrons[i].x) / 100.0) * total_velocity) * NS_AS_SEC * dt;
       double component_velocity_y = ((abs(neutrons[i].y) / 100.0) * total_velocity) * NS_AS_SEC * dt;
       double component_velocity_z = ((abs(neutrons[i].z) / 100.0) * total_velocity) * NS_AS_SEC * dt;
+      // Update position based on velocity
       if (neutrons[i].x > 0)
       {
         neutrons[i].pos_x += component_velocity_x;
@@ -183,21 +186,23 @@ static void updateNeutrons(int dt, struct simulation_configuration_struct *confi
           neutrons[i].pos_y > configuration->size_y || neutrons[i].pos_y < 0.0 ||
           neutrons[i].pos_z > configuration->size_z || neutrons[i].pos_z < 0.0)
       {
-        // Moved out of the reactor core, so deactivate the neutron
+        // Moved out of the reactor core, so deactivate the neutron (disappear)
         neutrons[i].active = false;
         neutron_index[currentNeutronIndex] = i;
         currentNeutronIndex++;
         continue;
       }
 
-      // Now figure out if neutron is in a fuel assembly, moderator or control rod. If so then need to handle interaction
+      // Now figure out if (active) neutron is in a fuel assembly, moderator or control rod. If so then need to handle interaction (using x and y)
       struct channel_struct *reactorChannel = locateChannelFromPosition(neutrons[i].pos_x, neutrons[i].pos_y, configuration);
       if (reactorChannel != NULL)
       {
         if (reactorChannel->type == FUEL_ASSEMBLY)
         {
-          // It is in a fuel assembly channel, determine if it has collided with a neutron and if so deactivate it
-          int fuel_pellet = (int)(neutrons[i].pos_z / HEIGHT_FUEL_PELLET_M);
+          /* It is in a fuel assembly channel, determine if it has collided with a neutron and if so deactivate it
+          Also update the channel contents too
+           */
+          int fuel_pellet = (int)(neutrons[i].pos_z / HEIGHT_FUEL_PELLET_M); // obtain ID of the fuel pallet
           if (fuel_pellet < reactorChannel->contents.fuel_assembly.num_pellets)
           {
             bool collision = determineAndHandleIfNeutronFuelCollision(neutrons[i].energy, reactorChannel, fuel_pellet, configuration->collision_prob_multiplyer);
@@ -249,9 +254,11 @@ static void updateNeutrons(int dt, struct simulation_configuration_struct *confi
  **/
 static void updateFuelAssembly(int dt, struct channel_struct *channel)
 {
+  // iterate through every pellets
   for (int i = 0; i < channel->contents.fuel_assembly.num_pellets; i++)
   {
     unsigned long int num_u236 = (unsigned long int)channel->contents.fuel_assembly.quantities[i][U236];
+    // fission every U236 
     for (unsigned long int j = 0; j < num_u236; j++)
     {
       int num_neutrons = fissionU236(channel, i);

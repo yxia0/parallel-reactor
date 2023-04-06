@@ -66,6 +66,8 @@ struct simulation_configuration_struct
   struct control_rod_config_struct *control_rod_configurations;
   int num_ctrl_rod_configurations;
   long int max_neutrons;
+  int num_fuel_assembly;
+  int num_pellet;
 };
 
 void parseConfiguration(char *, struct simulation_configuration_struct *);

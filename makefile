@@ -10,6 +10,9 @@ archer2: build
 cirrus: CC=gcc
 cirrus: build
 
+local: CC=mpicc
+local: build
+
 build: 
 	$(CC) -o reactor $(SRC) $(CFLAGS) $(LFLAGS)
 

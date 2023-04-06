@@ -6,6 +6,7 @@
 #include <time.h>
 #include "simulation_configuration.h"
 #include "simulation_support.h"
+#include "mpi.h"
 
 // Height of a fuel pellet in meters (they are 40mm by 40mm by 2.5mm)
 #define HEIGHT_FUEL_PELLET_M 0.0025
@@ -18,6 +19,7 @@
 // Number of nanoseconds in a second
 #define NS_AS_SEC 1e-9
 
+// These are global variables
 // The neutrons that are currently moving throughout the reactor core
 struct neutron_struct *neutrons;
 // Indexes of empty neutrons (i.e. those inactive) that can be used
@@ -27,11 +29,22 @@ unsigned long int currentNeutronIndex = 0;
 // The reactor core itself, each are channels in the x and y dimensions
 struct channel_struct **reactor_core;
 
+// FIXME: CHANGES I HAVE MADE :D
+// The change (delta) of all chemicals in all fuel assemblies.
+double *fuel_assembly_deltas;
+double *fuel_assembly_deltas_recv_buffer;
+// Map 2d index of a fuel channel to an integer, for example (1,3) -> 2.
+// FIXME: actually no need to store all 14 chemicals, some are never used in fuel assembly
+int *fuel_assembly_index;
+
+// MPI variables
+int size, myrank;
+
 static void step(int, struct simulation_configuration_struct *);
 static void generateReport(int, int, struct simulation_configuration_struct *, struct timeval);
 static void updateReactorCore(int, struct simulation_configuration_struct *);
 static void updateNeutrons(int, struct simulation_configuration_struct *);
-static void updateFuelAssembly(int, struct channel_struct *);
+static void updateFuelAssembly(int, struct channel_struct *, struct simulation_configuration_struct *, int, double *);
 static void updateNeutronGenerator(int, struct channel_struct *, struct simulation_configuration_struct *);
 static void createNeutrons(int, struct channel_struct *, double);
 static void initialiseReactorCore(struct simulation_configuration_struct *);
@@ -45,16 +58,38 @@ static unsigned long int getTotalNumberFissions(struct simulation_configuration_
 static unsigned long int getNumberActiveNeutrons(struct simulation_configuration_struct *);
 static double getElapsedTime(struct timeval);
 
+// FIXME: new functions I have added.
+static void modifyConfiguration(struct simulation_configuration_struct *, int);    // modify configuration for parallel version of code
+static void initialiseFuelAssemblyDelta(struct simulation_configuration_struct *); // initialise a big array to store all chemical delta.
+static void initialiseFuelAssemblyIndex(struct simulation_configuration_struct *);
+static void resetFuelAssemblyDelta(struct simulation_configuration_struct *); // reset all ddelta to zero
+
+static int
+locateChannelCounterFromPosition(double, double, struct simulation_configuration_struct *); // return fule assembly index
+static int getChannelCounterFromIndex(int, int, struct simulation_configuration_struct *);
+
 /**
  * Program entry point, this code is run with configuration file as command line argument
  **/
 int main(int argc, char *argv[])
 {
+
+  // MPI_Comm comm;
+  // initialise MPI process
+  // comm = MPI_COMM_WORLD;
+  MPI_Init(&argc, &argv);
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
+  MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+
   if (argc != 3)
   {
-    printf("You must provide two arguments, the configuration filename and output filename to the code\n");
+    if (myrank == 0)
+    {
+      printf("You must provide two arguments, the configuration filename and output filename to the code\n");
+    }
     return -1;
   }
+
   time_t t;
   // Seed the random number generator
   srand((unsigned)time(&t));
@@ -62,8 +97,14 @@ int main(int argc, char *argv[])
   // Parse the configuration and then initialise reactor core and neutrons from this
   struct simulation_configuration_struct configuration;
   parseConfiguration(argv[1], &configuration);
-  initialiseReactorCore(&configuration);
+  modifyConfiguration(&configuration, size);
+  initialiseReactorCore(&configuration); // leave as is.
   initialiseNeutrons(&configuration);
+  // FIXME: newly added!
+  // Delta array initialisation
+  initialiseFuelAssemblyDelta(&configuration);
+  // initialise fuel assembly index
+  initialiseFuelAssemblyIndex(&configuration);
   // Empty the file we will use to store the reactor state
   clearReactorStateFile(argv[2]);
   printf("Simulation configured for reactor core of size %dm by %dm by %dm, timesteps=%d dt=%dns\n", configuration.size_x,
@@ -73,6 +114,46 @@ int main(int argc, char *argv[])
   for (int i = 0; i < configuration.num_timesteps; i++)
   {
     // Progress in timesteps
+    /**
+     * TODO:
+     * add received (reduced) delta to reactor core; create a function to do this
+     * reset delta to zero.
+     */
+    resetFuelAssemblyDelta(&configuration);
+    double debug_reactor_sum = 0;
+    // debug. check if the reactor core is right
+    for (int i = 0; i < configuration.channels_x; i++)
+    {
+      for (int j = 0; j < configuration.channels_y; j++)
+      {
+        if (reactor_core[i][j].type == FUEL_ASSEMBLY)
+        {
+          struct channel_struct *fuel_channel = &(reactor_core[i][j]);
+          // get channel counter
+          int counter = getChannelCounterFromIndex(i, j, &configuration);
+          // loop over pallet
+          for (int p = 0; p < fuel_channel->contents.fuel_assembly.num_pellets; p++)
+          {
+            // loop over all chemicals
+            /*
+            U235 = 0,
+            U238 = 1,
+            Pu239 = 2,
+            U236 = 3,
+            Ba141 = 4,
+            Kr92 = 5,
+            Xe140 = 6,
+            */
+            int c = 0; // U235
+            int total_pallet = fuel_channel->contents.fuel_assembly.num_pellets;
+            int total_col = total_pallet * configuration.num_fuel_assembly;
+            int pos = c * total_col + counter * total_pallet + p;
+            debug_reactor_sum += fuel_channel->contents.fuel_assembly.quantities[p][c];
+          }
+        }
+      }
+    }
+    printf("Rank %d has Pu240 %2f at the start of simulation \n", myrank, debug_reactor_sum);
     step(configuration.dt, &configuration);
     if (i > 0 && i % configuration.display_progess_frequency == 0)
     {
@@ -89,8 +170,11 @@ int main(int argc, char *argv[])
   double mev = getMeVFromFissions(num_fissions);
   double joules = getJoulesFromMeV(mev);
   printf("------------------------------------------------------------------------------------------------\n");
+  printf("+-------Process %d-------+\n", myrank);
   printf("Model completed after %d timesteps\nTotal model time: %f secs\nTotal fissions: %ld releasing %e MeV and %e Joules\nTotal runtime: %.2f seconds\n",
          configuration.num_timesteps, (NS_AS_SEC * configuration.dt) * configuration.num_timesteps, num_fissions, mev, joules, getElapsedTime(start_time));
+
+  MPI_Finalize();
 }
 
 /**
@@ -98,8 +182,51 @@ int main(int argc, char *argv[])
  **/
 static void step(int dt, struct simulation_configuration_struct *configuration)
 {
+  int item_size = NUM_CHEMICALS * configuration->num_pellet * configuration->num_fuel_assembly;
+  // double debug_before_sum = 0;
+  // for (int h = 0; h < item_size; h++)
+  // {
+  //   debug_before_sum += fuel_assembly_deltas[h];
+  // }
+  // printf("Rank %d has total delta %2f before at the start of similation. \n", myrank, debug_before_sum);
   updateNeutrons(dt, configuration);
   updateReactorCore(dt, configuration);
+  // TODO: put into a function; all reduce delta.
+
+  // debug_before_sum = 0;
+  // for (int h = 0; h < item_size; h++)
+  // {
+  //   debug_before_sum += fuel_assembly_deltas[h];
+  // }
+
+  // printf("Rank %d has total delta %2f before All Reduce\n", myrank, debug_before_sum);
+  MPI_Allreduce(fuel_assembly_deltas, fuel_assembly_deltas_recv_buffer, item_size, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+  // add delta back to reactor core fuel assesembly
+  // iterator all fuel assembley
+  for (int i = 0; i < configuration->channels_x; i++)
+  {
+    for (int j = 0; j < configuration->channels_y; j++)
+    {
+      if (reactor_core[i][j].type == FUEL_ASSEMBLY)
+      {
+        struct channel_struct *fuel_channel = &(reactor_core[i][j]);
+        // get channel counter
+        int counter = getChannelCounterFromIndex(i, j, configuration);
+        // loop over pallet
+        for (int p = 0; p < fuel_channel->contents.fuel_assembly.num_pellets; p++)
+        {
+          // loop over all chemicals
+          for (int c = 0; c < NUM_CHEMICALS; c++)
+          {
+            int total_pallet = fuel_channel->contents.fuel_assembly.num_pellets;
+            int total_col = total_pallet * configuration->num_fuel_assembly;
+            int pos = c * total_col + counter * total_pallet + p;
+            fuel_channel->contents.fuel_assembly.quantities[p][c] += fuel_assembly_deltas_recv_buffer[pos];
+          }
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -127,7 +254,8 @@ static void updateReactorCore(int dt, struct simulation_configuration_struct *co
     {
       if (reactor_core[i][j].type == FUEL_ASSEMBLY)
       {
-        updateFuelAssembly(dt, &(reactor_core[i][j]));
+        int channelCounter = getChannelCounterFromIndex(i, j, configuration);
+        updateFuelAssembly(dt, &(reactor_core[i][j]), configuration, channelCounter, fuel_assembly_deltas);
       }
 
       if (reactor_core[i][j].type == NEUTRON_GENERATOR)
@@ -195,6 +323,7 @@ static void updateNeutrons(int dt, struct simulation_configuration_struct *confi
 
       // Now figure out if (active) neutron is in a fuel assembly, moderator or control rod. If so then need to handle interaction (using x and y)
       struct channel_struct *reactorChannel = locateChannelFromPosition(neutrons[i].pos_x, neutrons[i].pos_y, configuration);
+      int channelCounter = locateChannelCounterFromPosition(neutrons[i].pos_x, neutrons[i].pos_y, configuration);
       if (reactorChannel != NULL)
       {
         if (reactorChannel->type == FUEL_ASSEMBLY)
@@ -205,7 +334,9 @@ static void updateNeutrons(int dt, struct simulation_configuration_struct *confi
           int fuel_pellet = (int)(neutrons[i].pos_z / HEIGHT_FUEL_PELLET_M); // obtain ID of the fuel pallet
           if (fuel_pellet < reactorChannel->contents.fuel_assembly.num_pellets)
           {
-            bool collision = determineAndHandleIfNeutronFuelCollision(neutrons[i].energy, reactorChannel, fuel_pellet, configuration->collision_prob_multiplyer);
+            int total_col_delta = configuration->num_pellet * configuration->num_fuel_assembly;
+            bool collision = determineAndHandleIfNeutronFuelCollision(neutrons[i].energy, reactorChannel, fuel_pellet, configuration->collision_prob_multiplyer,
+                                                                      configuration->num_pellet, total_col_delta, channelCounter, fuel_assembly_deltas);
             if (collision)
             {
               neutrons[i].active = false;
@@ -246,33 +377,62 @@ static void updateNeutrons(int dt, struct simulation_configuration_struct *confi
       }
     }
   }
+  // printFuelAssemblyDelta(fuel_assembly_deltas, configuration->num_pellet, 5);
 }
 
 /**
  * Update the state of a specific fuel assembly in a channel for a timestep. This will fission all U236
  * and Pu239 in the assembly and update the constituent components as required
  **/
-static void updateFuelAssembly(int dt, struct channel_struct *channel)
+static void updateFuelAssembly(int dt, struct channel_struct *channel, struct simulation_configuration_struct *configuration, int channelCounter, double *delta)
 {
+  int total_col_delta = configuration->num_pellet * configuration->num_fuel_assembly;
   // iterate through every pellets
+  // printf("=====A new iteration through all pellets starts!====\n");
   for (int i = 0; i < channel->contents.fuel_assembly.num_pellets; i++)
   {
     unsigned long int num_u236 = (unsigned long int)channel->contents.fuel_assembly.quantities[i][U236];
-    // fission every U236 
+    // fission every U236, so in the end U236 becomes zero
+    // if (num_u236 > 0)
+    // {
+    //   printf("+----Fission of U236 for channel %d at pellet %d that has %lu U236----+\n", channelCounter, i, num_u236);
+    //   printf("Start: Remaining U236 is %f at pellet %d\n", delta[U236 * total_col_delta + channelCounter * configuration->num_pellet + i], i);
+    // }
     for (unsigned long int j = 0; j < num_u236; j++)
     {
-      int num_neutrons = fissionU236(channel, i);
+      int num_neutrons = fissionU236(channel, i, configuration->num_pellet, total_col_delta, channelCounter, delta);
       createNeutrons(num_neutrons, channel, (i * HEIGHT_FUEL_PELLET_M) + (HEIGHT_FUEL_PELLET_M / 2));
       channel->contents.fuel_assembly.num_fissions++;
     }
+    // if (num_u236 > 0)
+    // {
+    //   printf("Finished: Remaining U236 is %f at pellet %d\n", delta[U236 * total_col_delta + channelCounter * configuration->num_pellet + i], i);
+    // }
     unsigned long int num_pu240 = (unsigned long int)channel->contents.fuel_assembly.quantities[i][Pu240];
+    // debug
+    // if (num_pu240 > 0)
+    // {
+    //   printf("+----Fission of Pu240 for channel %d that has %lu pu240----+\n", channelCounter, num_pu240);
+    // }
+
     for (unsigned long int j = 0; j < num_pu240; j++)
     {
-      int num_neutrons = fissionPu240(channel, i);
+      int num_neutrons = fissionPu240(channel, i, configuration->num_pellet, total_col_delta, channelCounter, delta);
       createNeutrons(num_neutrons, channel, (i * HEIGHT_FUEL_PELLET_M) + (HEIGHT_FUEL_PELLET_M / 2));
       channel->contents.fuel_assembly.num_fissions++;
     }
+    // if (num_pu240 > 0)
+    // {
+    //   printf("Finished: Remaining Pu240 is %f at pellet %d\n", delta[Pu240 * total_col_delta + channelCounter * configuration->num_pellet + i], i);
+    // }
   }
+  int t = NUM_CHEMICALS * total_col_delta;
+  double sum_debug = 0;
+  for (int l = 0; l < t; l++)
+  {
+    sum_debug += delta[l];
+  }
+  // printf("On process %d: in function update, total delta is %2f \n", myrank, sum_debug);
 }
 
 /**
@@ -301,8 +461,8 @@ static void createNeutrons(int num_neutrons, struct channel_struct *channel, dou
   for (int k = 0; k < num_neutrons; k++)
   {
     if (currentNeutronIndex == 0)
-      break;
-    currentNeutronIndex--;
+      break;               // reach the maximum number of neutron, so do nothing
+    currentNeutronIndex--; // everytime a neutron becomes active
     unsigned long int index = neutron_index[currentNeutronIndex];
     initialiseNeutron(&(neutrons[index]), channel, z);
   }
@@ -367,6 +527,9 @@ static void initialiseReactorCore(struct simulation_configuration_struct *simula
           // Each fuel pellet is 40mm by 40mm by 2mm deep and weighs 1 gram
           reactor_core[i][j].contents.fuel_assembly.num_pellets = simulation_configuration->size_z / FUEL_PELLET_DEPTH;
           reactor_core[i][j].contents.fuel_assembly.num_fissions = 0;
+          /*
+          FIXME: this is what we want to synchronise !!!
+          */
           reactor_core[i][j].contents.fuel_assembly.quantities = (double(*)[NUM_CHEMICALS])malloc(
               sizeof(unsigned long int[NUM_CHEMICALS]) * reactor_core[i][j].contents.fuel_assembly.num_pellets);
           for (int z = 0; z < reactor_core[i][j].contents.fuel_assembly.num_pellets; z++)
@@ -561,4 +724,111 @@ static double getElapsedTime(struct timeval start_time)
   gettimeofday(&curr_time, NULL);
   long int elapsedtime = (curr_time.tv_sec * 1000000 + curr_time.tv_usec) - (start_time.tv_sec * 1000000 + start_time.tv_usec);
   return elapsedtime / 1000000.0;
+}
+
+/**
+ * 1) Change the max_neutron in configuration file to local maximum of neutrons distributed
+ * on each processor.
+ * 2) add the number of pellet per fuel assembly, now that every fuel assembly has the same amount.
+ */
+static void modifyConfiguration(struct simulation_configuration_struct *configuration, int size)
+{
+  long int local_max = configuration->max_neutrons / size;
+  if (local_max * size < configuration->max_neutrons)
+  {
+    if (myrank < configuration->max_neutrons - local_max * size)
+    {
+      local_max++;
+    }
+  }
+
+  configuration->max_neutrons = local_max;
+  // debug
+  printf("Rank %d has % ld neutrons initialised \n.", myrank, configuration->max_neutrons);
+
+  configuration->num_pellet = configuration->size_z / FUEL_PELLET_DEPTH;
+}
+
+/* Initialise an array to store the change of chemical amount for each pellet for
+each fuel assembly.
+ */
+static void initialiseFuelAssemblyDelta(struct simulation_configuration_struct *configuration)
+{
+  int total_size = NUM_CHEMICALS * configuration->num_pellet * configuration->num_fuel_assembly;
+  fuel_assembly_deltas = (double *)malloc(sizeof(double) * total_size);
+  for (int i = 0; i < total_size; i++)
+  {
+    fuel_assembly_deltas[i] = 0;
+  }
+  fuel_assembly_deltas_recv_buffer = (double *)malloc(sizeof(double) * total_size);
+  printf("FuelAssemblyDelta and Buffer get initialised \n");
+}
+
+static void resetFuelAssemblyDelta(struct simulation_configuration_struct *configuration)
+{
+  int total_size = NUM_CHEMICALS * configuration->num_pellet * configuration->num_fuel_assembly;
+  for (int i = 0; i < total_size; i++)
+  {
+    fuel_assembly_deltas[i] = 0;
+  }
+}
+
+/**
+ * For example, for this reactor core,
+ * FUEL FUEL
+ * FUEL CONTROL
+ * CONTROL FUEL, we have fuel_assembly_index as
+ *
+ * 0 , 1
+ * 2 , 0
+ * 0 , 3
+ *
+ */
+static void initialiseFuelAssemblyIndex(struct simulation_configuration_struct *configuration)
+{
+  int total_channel = configuration->channels_x * configuration->channels_y;
+  fuel_assembly_index = (int *)malloc(sizeof(int) * total_channel);
+  int count = 0;
+  for (int i = 0; i < configuration->channels_x; i++)
+  {
+    for (int j = 0; j < configuration->channels_y; j++)
+    {
+      if (reactor_core[i][j].type == FUEL_ASSEMBLY)
+      {
+        fuel_assembly_index[j + i * configuration->channels_y] = count;
+        count++;
+      }
+      else
+      {
+        fuel_assembly_index[j + i * configuration->channels_y] = 0;
+      }
+    }
+  }
+  printf("FuelAssemblyIndex gets initialised \n");
+  // // print for debug
+  // printf("Fuel Assembly index [ ");
+  // for (int i = 0; i < configuration->channels_x; i++)
+  // {
+  //   for (int j = 0; j < configuration->channels_y; j++)
+  //   {
+  //     printf("%d, ", fuel_assembly_index[j + i * configuration->channels_y]);
+  //   }
+  // }
+  // printf(" ].\n");
+}
+
+static int locateChannelCounterFromPosition(double x, double y, struct simulation_configuration_struct *configuration)
+{
+  if (x > configuration->size_x || x < 0.0)
+    return 0;
+  if (y > configuration->size_y || y < 0.0)
+    return 0;
+  int channel_x = (int)(x / 0.2);
+  int channel_y = (int)(y / 0.2);
+  return fuel_assembly_index[channel_y + channel_x * configuration->channels_y];
+}
+
+static int getChannelCounterFromIndex(int x, int y, struct simulation_configuration_struct *configuration)
+{
+  return fuel_assembly_index[y + x * configuration->channels_y];
 }

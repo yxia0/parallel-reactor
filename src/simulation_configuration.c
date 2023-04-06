@@ -70,6 +70,8 @@ void parseConfiguration(char *filename, struct simulation_configuration_struct *
           simulation_configuration->collision_prob_multiplyer = getIntValue(buffer);
         if (strstr(buffer, "MAX_NEUTRONS") != NULL)
           simulation_configuration->max_neutrons = getLongValue(buffer);
+        if (strstr(buffer, "NUM_FUEL") != NULL)
+          simulation_configuration->num_fuel_assembly = getIntValue(buffer);
 
         if (strstr(buffer, "CHANNELROW_") != NULL)
         {

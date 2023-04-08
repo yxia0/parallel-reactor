@@ -3,11 +3,11 @@
 # NS per timestep
 DT=10
 # Total number of timesteps
-NUM_TIMESTEPS=10000000
+NUM_TIMESTEPS=3
 # Frequency (in timesteps) to display progress
 DISPLAY_PROGRESS_FREQUENCY=100
 # Artificial maximum neutron limit
-MAX_NEUTRONS=1000000
+MAX_NEUTRONS=100000
 # Artificial collision probability multiplier
 COLLISION_PROB_MULTIPLYER=1000
 # Frequency (in timesteps) to write reactor state to file
@@ -17,6 +17,9 @@ WRITE_REACTOR_STATE_FREQUENCY=1000
 SIZE_X=1
 SIZE_Y=1
 SIZE_Z=1
+
+# Number of fuel assembly channels
+NUM_FUEL=16 
 
 # Fuel proportion
 FUEL_U235=15%

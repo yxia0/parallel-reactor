@@ -1,6 +1,6 @@
-SRC = src/simulation_configuration.c src/main.c src/simulation_support.c
-LFLAGS=-lm
-CFLAGS=-O3
+SRC = src/simulation_configuration.c src/main.c src/simulation_support.c src/simulation_parallel.c
+LFLAGS=-lm -fsanitize=address
+CFLAGS=-Og -g -fsanitize=address -Wall -Wextra -Wpedantic -Wshadow
 
 .PHONY: archer2 local build
 

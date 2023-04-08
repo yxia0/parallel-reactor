@@ -68,6 +68,9 @@ struct simulation_configuration_struct
   long int max_neutrons;
   int num_fuel_assembly;
   int num_pellet;
+  int fuel_assembly_total_entries_size;
+  unsigned long int num_fissions;
+  unsigned long int num_fissions_delta;
 };
 
 void parseConfiguration(char *, struct simulation_configuration_struct *);

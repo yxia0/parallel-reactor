@@ -146,6 +146,8 @@ void parseConfiguration(char *filename, struct simulation_configuration_struct *
   }
   simulation_configuration->channels_x = (simulation_configuration->size_x * 100) / 20;
   simulation_configuration->channels_y = (simulation_configuration->size_y * 100) / 20;
+  simulation_configuration->num_fissions = 0;
+  simulation_configuration->num_fissions_delta = 0;
   checkConfiguration(simulation_configuration);
   fclose(f);
 }

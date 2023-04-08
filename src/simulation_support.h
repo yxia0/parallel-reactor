@@ -55,7 +55,7 @@ struct fuel_assembly_struct
 {
   double (*quantities)[NUM_CHEMICALS];
   int num_pellets;
-  unsigned long int num_fissions;
+  // unsigned long int num_fissions;
 };
 
 // State of a control rod in a channel
@@ -101,9 +101,9 @@ struct channel_struct
 unsigned long int getNumberNeutronsFromGenerator(double, int);
 double MeVToVelocity(double, int);
 bool determineAndHandleIfNeutronModeratorCollision(struct neutron_struct *, int, enum moderator_type_enum, int);
-bool determineAndHandleIfNeutronFuelCollision(double, struct channel_struct *, int, int, int, int, int, double *);
-int fissionPu240(struct channel_struct *, int, int, int, int, double *);
-int fissionU236(struct channel_struct *, int, int, int, int, double *);
+bool determineAndHandleIfNeutronFuelCollision(double, struct channel_struct *, int, int);
+int fissionPu240(struct channel_struct *, int);
+int fissionU236(struct channel_struct *, int);
 void initialiseNeutron(struct neutron_struct *, struct channel_struct *, double);
 double getMeVFromFissions(unsigned long int);
 double getJoulesFromMeV(double);

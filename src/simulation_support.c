@@ -134,38 +134,30 @@ bool determineAndHandleIfNeutronModeratorCollision(struct neutron_struct *neutro
  * the U235 and Pu239 fuels (it is assumed that no other fuels fission).
  **/
 bool determineAndHandleIfNeutronFuelCollision(double MeV, struct channel_struct *reactor_channel,
-                                              int fuel_pellet, int collision_prob_multiplyer, int total_pellet, int delta_total_col, int channel_counter, double *delta)
+                                              int fuel_pellet, int collision_prob_multiplyer)
 {
   double deBroglieWavelength = calculateDeBroglieWavelength(MeV, 1);
   // Calculate the cross section in Barns for each chemical and determine if a collision occured
   // if so add the neutron to the atom it collided with.
   if (reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][U235] > 0)
   {
-    // depends on U235
     if (determineNeutronAbsorbtionByFuel(deBroglieWavelength, reactor_channel, U235, fuel_pellet, collision_prob_multiplyer))
     {
-      // reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][U235]--;
+      // printf("U235 at pellet %d is %lf before \n", fuel_pellet, reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][U235]);
+      reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][U235]--;
+      // printf("U235 at pellet %d is %lf now \n", fuel_pellet, reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][U235]);
+      // printf("U236 at pellet %d is %lf before \n", fuel_pellet, reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][U236]);
       reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][U236]++;
-      // printf("Fule Assembly No. %d has +1 U236 at pellet %d \n", channel_counter, fuel_pellet);
-      // update delta
-      delta[U235 * delta_total_col + channel_counter * total_pellet + fuel_pellet]--;
-      delta[U236 * delta_total_col + channel_counter * total_pellet + fuel_pellet]++;
-      // printf("Now Fule Assembly No. %d has %4f U236\n", channel_counter, delta[U236 * delta_total_col + channel_counter * total_pellet + fuel_pellet]);
-      // printf("This should match with %4f in reactor content\n", reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][U236]);
-      // printf("+-------------------+\n");
+      // printf("U236 at pellet %d is %lf now \n", fuel_pellet, reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][U236]);
       return true;
     }
   }
   if (reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][Pu239] > 0)
   {
-    // depends on Pu239
     if (determineNeutronAbsorbtionByFuel(deBroglieWavelength, reactor_channel, Pu239, fuel_pellet, collision_prob_multiplyer))
     {
-      // reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][Pu239]--;
+      reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][Pu239]--;
       reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][Pu240]++;
-      // update delta
-      delta[Pu239 * delta_total_col + channel_counter * total_pellet + fuel_pellet]--;
-      delta[Pu240 * delta_total_col + channel_counter * total_pellet + fuel_pellet]++;
       return true;
     }
   }
@@ -177,28 +169,21 @@ bool determineAndHandleIfNeutronFuelCollision(double MeV, struct channel_struct 
  * Zirconium, releasing 3 neutrons, or go back to Pu239 releasing
  * one neutron.
  **/
-int fissionPu240(struct channel_struct *channel, int fuel_pellet, int total_pellet, int delta_total_col, int channel_counter, double *delta)
+int fissionPu240(struct channel_struct *channel, int fuel_pellet)
 {
   double r = generateDecimalRandomNumber();
   if (r < 0.73)
   {
-    // channel->contents.fuel_assembly.quantities[fuel_pellet][Xe134]++;
-    // channel->contents.fuel_assembly.quantities[fuel_pellet][Zr103]++;
+    channel->contents.fuel_assembly.quantities[fuel_pellet][Xe134]++;
+    channel->contents.fuel_assembly.quantities[fuel_pellet][Zr103]++;
     channel->contents.fuel_assembly.quantities[fuel_pellet][Pu240]--;
-
-    delta[Xe134 * delta_total_col + channel_counter * total_pellet + fuel_pellet]++;
-    delta[Zr103 * delta_total_col + channel_counter * total_pellet + fuel_pellet]++;
-    delta[Pu240 * delta_total_col + channel_counter * total_pellet + fuel_pellet]--;
 
     return 3;
   }
   else
   {
-    // channel->contents.fuel_assembly.quantities[fuel_pellet][Pu239]++;
+    channel->contents.fuel_assembly.quantities[fuel_pellet][Pu239]++;
     channel->contents.fuel_assembly.quantities[fuel_pellet][Pu240]--;
-
-    delta[Pu239 * delta_total_col + channel_counter * total_pellet + fuel_pellet]++;
-    delta[Pu240 * delta_total_col + channel_counter * total_pellet + fuel_pellet]--;
 
     return 1;
   }
@@ -209,30 +194,22 @@ int fissionPu240(struct channel_struct *channel, int fuel_pellet, int total_pell
  * and Krypton releasing 3 neutrons, or Xenon and Strontium releasing
  * 2 neutrons.
  **/
-int fissionU236(struct channel_struct *channel, int fuel_pellet, int total_pellet, int delta_total_col, int channel_counter, double *delta)
+int fissionU236(struct channel_struct *channel, int fuel_pellet)
 {
   double r = generateDecimalRandomNumber();
   if (r < 0.85)
   {
-    // channel->contents.fuel_assembly.quantities[fuel_pellet][Ba141]++;
-    // channel->contents.fuel_assembly.quantities[fuel_pellet][Kr92]++;
+    channel->contents.fuel_assembly.quantities[fuel_pellet][Ba141]++;
+    channel->contents.fuel_assembly.quantities[fuel_pellet][Kr92]++;
     channel->contents.fuel_assembly.quantities[fuel_pellet][U236]--;
-
-    delta[Ba141 * delta_total_col + channel_counter * total_pellet + fuel_pellet]++;
-    delta[Kr92 * delta_total_col + channel_counter * total_pellet + fuel_pellet]++;
-    delta[U236 * delta_total_col + channel_counter * total_pellet + fuel_pellet]--;
 
     return 3;
   }
   else
   {
-    // channel->contents.fuel_assembly.quantities[fuel_pellet][Xe140]++;
-    // channel->contents.fuel_assembly.quantities[fuel_pellet][Sr94]++;
+    channel->contents.fuel_assembly.quantities[fuel_pellet][Xe140]++;
+    channel->contents.fuel_assembly.quantities[fuel_pellet][Sr94]++;
     channel->contents.fuel_assembly.quantities[fuel_pellet][U236]--;
-
-    delta[Xe140 * delta_total_col + channel_counter * total_pellet + fuel_pellet]++;
-    delta[Sr94 * delta_total_col + channel_counter * total_pellet + fuel_pellet]++;
-    delta[U236 * delta_total_col + channel_counter * total_pellet + fuel_pellet]--;
 
     return 2;
   }

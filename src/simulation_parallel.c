@@ -5,15 +5,20 @@
 #include <stdbool.h>
 #include <string.h>
 
-/**
- * any static (private) functions
- * go here!
- *
- */
+static void modifyLocalNeutronSize(struct simulation_configuration_struct *, int, int);
+static void modifyLocalNeutronGeneratorWeight(struct simulation_configuration_struct *, int);
+static void setHelperValuesInConfig(struct simulation_configuration_struct *);
 static int getIndexOfFuelAssemblyEntry(int, int, int, struct simulation_configuration_struct *);
 static int getIndexOfFuelAssembly(int, int, int, int *);
 
-void modifyLocalNeutronSize(struct simulation_configuration_struct *config, int processSize, int myrank)
+void modifyConfigurationToParallelSetting(struct simulation_configuration_struct *config, int processSize, int myrank)
+{
+    modifyLocalNeutronSize(config, processSize, myrank);
+    modifyLocalNeutronGeneratorWeight(config, processSize);
+    setHelperValuesInConfig(config);
+}
+
+static void modifyLocalNeutronSize(struct simulation_configuration_struct *config, int processSize, int myrank)
 {
     long int local_max = config->max_neutrons / processSize;
     if (local_max * processSize < config->max_neutrons)
@@ -26,9 +31,14 @@ void modifyLocalNeutronSize(struct simulation_configuration_struct *config, int 
     config->max_neutrons = local_max;
 }
 
-void setHelperValuesInConfig(struct simulation_configuration_struct *config, double fuel_pellet_depth)
+static void modifyLocalNeutronGeneratorWeight(struct simulation_configuration_struct *config, int processSize)
 {
-    config->num_pellet = config->size_z / fuel_pellet_depth;
+    config->neutron_generator_weight_per_cm /= processSize;
+}
+
+static void setHelperValuesInConfig(struct simulation_configuration_struct *config)
+{
+    config->num_pellet = config->size_z / config->fuel_pellet_depth;
     config->fuel_assembly_total_entries_size = NUM_CHEMICALS * config->num_pellet * config->num_fuel_assembly;
 }
 
@@ -174,10 +184,6 @@ void calculateChemicalDelta(struct channel_struct **reactor, struct channel_stru
 
                         int channel_index = getIndexOfFuelAssembly(i, j, config->channels_y, index);
                         int pos = getIndexOfFuelAssemblyEntry(k, z, channel_index, config);
-                        // if (currAmount != prevAmount)
-                        // {
-                        //     printf("Chemical %d changes!\n", k);
-                        // }
                         delta[pos] = (currAmount - prevAmount);
                     }
                 }

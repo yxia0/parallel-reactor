@@ -6,8 +6,7 @@
 
 typedef struct channel_struct **Reactor;
 
-void modifyLocalNeutronSize(struct simulation_configuration_struct *, int, int);
-void setHelperValuesInConfig(struct simulation_configuration_struct *, double);
+void modifyConfigurationToParallelSetting(struct simulation_configuration_struct *, int, int);
 /* Make a copy of the reactor core */
 void initialiseReactorCopy(struct simulation_configuration_struct *, struct channel_struct **, struct channel_struct ***);
 void initialiseChemicalDelta(struct simulation_configuration_struct *, double **, double **);

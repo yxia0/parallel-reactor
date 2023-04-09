@@ -3,7 +3,7 @@
 # NS per timestep
 DT=10
 # Total number of timesteps
-NUM_TIMESTEPS=3
+NUM_TIMESTEPS=1000
 # Frequency (in timesteps) to display progress
 DISPLAY_PROGRESS_FREQUENCY=100
 # Artificial maximum neutron limit
@@ -19,15 +19,22 @@ SIZE_Y=1
 SIZE_Z=1
 
 # Number of fuel assembly channels
-NUM_FUEL=16 
+NUM_FUEL=16
+
+# Depth of fuel pellets in meters
+PELLET_DEPTH=0.002
 
 # Fuel proportion
 FUEL_U235=15%
 FUEL_U238=85%
 
 MODERATOR=WATER
+
 # Weight of moderator in grams
 MOD_WEIGHT=1000000
+
+# Weight in grams of the neutron generator for each cm in height
+NEUTRON_GENERATOR_WEIGHT_PER_CM=0.5
 
 # Percentage control rod insertion
 CONTROLROD_1_1=10%

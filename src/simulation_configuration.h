@@ -71,6 +71,8 @@ struct simulation_configuration_struct
   int fuel_assembly_total_entries_size;
   unsigned long int num_fissions;
   unsigned long int num_fissions_delta;
+  double fuel_pellet_depth;
+  double neutron_generator_weight_per_cm;
 };
 
 void parseConfiguration(char *, struct simulation_configuration_struct *);

@@ -72,6 +72,10 @@ void parseConfiguration(char *filename, struct simulation_configuration_struct *
           simulation_configuration->max_neutrons = getLongValue(buffer);
         if (strstr(buffer, "NUM_FUEL") != NULL)
           simulation_configuration->num_fuel_assembly = getIntValue(buffer);
+        if (strstr(buffer, "PELLET_DEPTH") != NULL)
+          simulation_configuration->fuel_pellet_depth = getDoubleValue(buffer);
+        if (strstr(buffer, "NEUTRON_GENERATOR_WEIGHT_PER_CM") != NULL)
+          simulation_configuration->neutron_generator_weight_per_cm = getDoubleValue(buffer);
 
         if (strstr(buffer, "CHANNELROW_") != NULL)
         {

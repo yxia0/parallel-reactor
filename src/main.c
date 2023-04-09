@@ -13,10 +13,6 @@
 #define HEIGHT_FUEL_PELLET_M 0.0025
 // Size of each reactor channel in meters (they are cuboid, so this value in x and y)
 #define CHANNEL_SIZE 0.2
-// Depth of fuel pellets in meters (they are x=40mm by y=40mm by z=2mm)
-#define FUEL_PELLET_DEPTH 0.002
-// Weight in grams of the neutron generator for each cm in height
-#define NEUTRON_GENERATOR_WEIGHT_PER_CM 0.5
 // Number of nanoseconds in a second
 #define NS_AS_SEC 1e-9
 
@@ -92,8 +88,7 @@ int main(int argc, char *argv[])
   struct simulation_configuration_struct configuration;
   parseConfiguration(argv[1], &configuration);
   // Parse configurations needed for parallelisation
-  modifyLocalNeutronSize(&configuration, size, myrank);
-  setHelperValuesInConfig(&configuration, FUEL_PELLET_DEPTH);
+  modifyConfigurationToParallelSetting(&configuration, size, myrank);
   // initialise reactor core and neutrons from configuration
   initialiseReactorCore(&configuration); // leave as is.
   initialiseNeutrons(&configuration);
@@ -113,43 +108,42 @@ int main(int argc, char *argv[])
     // Progress in timesteps
     step(configuration.dt, &configuration);
     // FOR PARALLEL: Synchronize fuel assembly and num of fission
-    printf("+---------At the beginning of this simu iter at processor %d-------+\n", myrank);
-    printReactorCopy(reactor_core_copy, &configuration);
-    // printChemicalDelta(fuel_assembly_deltas, &configuration);
     calculateChemicalDelta(reactor_core, reactor_core_copy, fuel_assembly_deltas, fuel_assembly_index, &configuration);
-
     MPI_Allreduce(fuel_assembly_deltas, fuel_assembly_deltas_recv_buffer, configuration.fuel_assembly_total_entries_size, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(&(configuration.num_fissions_delta), &num_fission_buffer, 1, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD);
+
     applyDeltaToReactor(fuel_assembly_deltas_recv_buffer, reactor_core_copy, fuel_assembly_index, &configuration);
     copyFuelAssembly(reactor_core, reactor_core_copy, &configuration);
+    resetChemicalDelta(fuel_assembly_deltas, &configuration);
 
-    printf("+---------At the end of this simu iter at processor %d-------+\n", myrank);
-    printReactorCopy(reactor_core_copy, &configuration);
-
-    MPI_Allreduce(&(configuration.num_fissions_delta), &num_fission_buffer, 1, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD);
-    // printf("Num of fission at Rank %d is : %d \n", myrank, configuration.num_fissions_delta);
     configuration.num_fissions_delta = 0;
     configuration.num_fissions += num_fission_buffer;
 
-    if (i > 0 && i % configuration.display_progess_frequency == 0)
+    if (myrank == 0)
     {
-      generateReport(configuration.dt, i, &configuration, start_time);
-    }
+      if (i > 0 && i % configuration.display_progess_frequency == 0)
+      {
+        generateReport(configuration.dt, i, &configuration, start_time);
+      }
 
-    if (i > 0 && i % configuration.write_reactor_state_frequency == 0)
-    {
-      writeReactorState(&configuration, i, argv[2]);
+      if (i > 0 && i % configuration.write_reactor_state_frequency == 0)
+      {
+        writeReactorState(&configuration, i, argv[2]);
+      }
     }
   }
   // Now we are finished write some summary information
   // unsigned long int num_fissions = getTotalNumberFissions(&configuration);
-  unsigned long int num_fissions = configuration.num_fissions;
-  double mev = getMeVFromFissions(num_fissions);
-  double joules = getJoulesFromMeV(mev);
-  printf("------------------------------------------------------------------------------------------------\n");
-  printf("+-------Process %d-------+\n", myrank);
-  printf("Model completed after %d timesteps\nTotal model time: %f secs\nTotal fissions: %ld releasing %e MeV and %e Joules\nTotal runtime: %.2f seconds\n",
-         configuration.num_timesteps, (NS_AS_SEC * configuration.dt) * configuration.num_timesteps, num_fissions, mev, joules, getElapsedTime(start_time));
-
+  if (myrank == 0)
+  {
+    unsigned long int num_fissions = configuration.num_fissions;
+    double mev = getMeVFromFissions(num_fissions);
+    double joules = getJoulesFromMeV(mev);
+    printf("------------------------------------------------------------------------------------------------\n");
+    printf("+-------Process %d-------+\n", myrank);
+    printf("Model completed after %d timesteps\nTotal model time: %f secs\nTotal fissions: %ld releasing %e MeV and %e Joules\nTotal runtime: %.2f seconds\n",
+           configuration.num_timesteps, (NS_AS_SEC * configuration.dt) * configuration.num_timesteps, num_fissions, mev, joules, getElapsedTime(start_time));
+  }
   MPI_Finalize();
 }
 
@@ -346,7 +340,7 @@ static void updateFuelAssembly(int dt, struct channel_struct *channel, struct si
 static void updateNeutronGenerator(int dt, struct channel_struct *channel, struct simulation_configuration_struct *configuration)
 {
   unsigned long int number_new_neutrons = getNumberNeutronsFromGenerator(channel->contents.neutron_generator.weight, dt);
-  for (int i = 0; i < number_new_neutrons; i++)
+  for (unsigned long int i = 0; i < number_new_neutrons; i++)
   {
     if (currentNeutronIndex == 0)
       break;
@@ -429,7 +423,7 @@ static void initialiseReactorCore(struct simulation_configuration_struct *simula
           // This channel is a fuel assembly, so initialise that
           reactor_core[i][j].type = FUEL_ASSEMBLY;
           // Each fuel pellet is 40mm by 40mm by 2mm deep and weighs 1 gram
-          reactor_core[i][j].contents.fuel_assembly.num_pellets = simulation_configuration->size_z / FUEL_PELLET_DEPTH;
+          reactor_core[i][j].contents.fuel_assembly.num_pellets = simulation_configuration->size_z / simulation_configuration->fuel_pellet_depth;
           // reactor_core[i][j].contents.fuel_assembly.num_fissions = 0;
           reactor_core[i][j].contents.fuel_assembly.quantities = (double(*)[NUM_CHEMICALS])malloc(
               sizeof(double[NUM_CHEMICALS]) * reactor_core[i][j].contents.fuel_assembly.num_pellets);
@@ -464,7 +458,7 @@ static void initialiseReactorCore(struct simulation_configuration_struct *simula
         {
           reactor_core[i][j].type = NEUTRON_GENERATOR;
           // Half a gram per cm in height
-          reactor_core[i][j].contents.neutron_generator.weight = simulation_configuration->size_z * 100 * NEUTRON_GENERATOR_WEIGHT_PER_CM;
+          reactor_core[i][j].contents.neutron_generator.weight = simulation_configuration->size_z * 100 * simulation_configuration->neutron_generator_weight_per_cm;
         }
       }
       for (int j = simulation_configuration->num_channel_configs[i]; j < simulation_configuration->channels_y; j++)

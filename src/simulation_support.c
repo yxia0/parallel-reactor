@@ -143,12 +143,8 @@ bool determineAndHandleIfNeutronFuelCollision(double MeV, struct channel_struct 
   {
     if (determineNeutronAbsorbtionByFuel(deBroglieWavelength, reactor_channel, U235, fuel_pellet, collision_prob_multiplyer))
     {
-      // printf("U235 at pellet %d is %lf before \n", fuel_pellet, reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][U235]);
       reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][U235]--;
-      // printf("U235 at pellet %d is %lf now \n", fuel_pellet, reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][U235]);
-      // printf("U236 at pellet %d is %lf before \n", fuel_pellet, reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][U236]);
       reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][U236]++;
-      // printf("U236 at pellet %d is %lf now \n", fuel_pellet, reactor_channel->contents.fuel_assembly.quantities[fuel_pellet][U236]);
       return true;
     }
   }
